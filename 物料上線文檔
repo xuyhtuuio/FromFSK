@@ -1,0 +1,172 @@
+詳情請看submitMaterialOnlineInfo方法
+具體每一步的業務流程去看拋錯！！！！！！
+
+//备料载具(移入载具)
+String prepareVehicleCode = materialOnlineSubmitVO.getPrepareVehicleCode();
+//分料载具(移出载具)
+String    distributeVehicleCode=materialOnlineSubmitVO.getDistributeVehicleCode();
+//工厂组织
+String orgCode = materialOnlineSubmitVO.getOrgCode();
+//条码
+String pkgId = materialOnlineSubmitVO.getPkgId();
+//储位
+String binCode = materialOnlineSubmitVO.getBinCode();
+//工单号
+String workOrderNo = materialOnlineSubmitVO.getWorkOrderNo();
+
+ 
+
+
+1.	先檢查是否檢料了，也就是拿著這個值去檢料表裡面去找（也即是work-order-pick-log表）
+//查询捡料记录
+        WmsWorkOrderPickLog wmsWorkOrderPickLogDb = wmsWorkOrderPickLogMapper.selectOne(Wrappers.<WmsWorkOrderPickLog>lambdaQuery()
+                .eq(WmsWorkOrderPickLog::getOrgCode, orgCode)
+                .eq(WmsWorkOrderPickLog::getPkgId, pkgId)                .eq(WmsWorkOrderPickLog::getPrepareWoFlag, "0")
+                .orderByDesc(WmsWorkOrderPickLog::getId)
+                .last("limit 1"));
+
+只需要工場組織ID（org_id）, 物料ID(Pkg_id), 並且已經備料(0/1)
+這個是否備料和備料載具有關
+詳情去看 方法裡的拋錯
+
+  		//群组
+        String workOrderItem = wmsWorkOrderPickLogDb.getWorkOrderItem();
+        //料号
+        String partNo = wmsWorkOrderPickLogDb.getPartNo();
+        //可用量
+        BigDecimal currentQty = wmsWorkOrderPickLogDb.getCurrentQty();
+
+2.	檢驗該料的有效期
+//校验料号有效期
+        checkPartNoValidDate(partNo, wmsWorkOrderPickLogDb.getSupplierPartNo(), wmsWorkOrderPickLogDb.getMfgName(),
+                wmsWorkOrderPickLogDb.getOrgCode(), wmsWorkOrderPickLogDb.getPlantCode());
+
+3.	檢驗燒錄信息（也即是pkg_burn_info表）
+
+String productPartNo = wmsWorkOrderPickLogDb.getProductPartNo();
+String burnValue = wmsWorkOrderPickLogDb.getBurnValue();
+String pkgId = wmsWorkOrderPickLogDb.getPkgId();
+
+這裡面分為Mes燒錄
+如果燒錄值（傳過來的燒錄值），但是MES的burnValue為空那麼就是未配置
+如果兩個值相等也即是burnValue和mesBurnValue
+那麼即使燒錄值錯誤，不能上線的
+
+//查询料号在MES是否有对应的烧录信息 
+        List<BurnInfoNewDTO> burnInfoNewDTOList = wmsPkgBurnInfoService.getOnLineBurnedInfo(orgCode, productPartNo);
+
+還有一種情況就是
+//PKG不需要烧录但PKG烧录值不为空,提示PKG有烧录值，但工单不需要烧录，请先擦除
+	
+也就是burnValue有值但是MESBUrnValue查出來沒有記錄
+
+
+4.	校验lcr和丝印(TopMarking)信息
+
+//校验lcr,丝印信息
+        checkLcrAndTopMarking(orgCode, pkgId, wmsWorkOrderPickLogDb);
+
+先判斷是否需要LCR在判斷TopMarking信息，有點繁瑣就不一一列舉啦，自己去看吧。
+
+在判斷LCR時：
+
+從檢料記錄表中獲取數量(pkg_info)
+//当前数量等于原始数量时,不需要LCR,LCR记录中如果不存在则新增一笔LCR成功完成记录
+//当前数量不等于原始数量时,判断LCR结果
+
+
+5.	校验msd必须为封装状态以及有效时长必须大于等于8小时
+
+這個需要調用MES子系統
+
+
+
+checkService.checkSealConditionAndRemainTime(orgCode, partNo, wmsWorkOrderPickLogDb.getSupplierPartNo(),
+                wmsWorkOrderPickLogDb.getMfgName(), wmsWorkOrderPickLogDb.getPkgId(),
+                wmsWorkOrderPickLogDb.getOriginalDateCode(), wmsWorkOrderPickLogDb.getLotCode(),
+                StatusCode.Y.getDictCode(), wmsWorkOrderPickLogDb.getPlantCode(),
+                8);
+
+
+
+1)	首先判斷是不是MSD物料
+檢查MSD要去物料表去找
+首先要判斷是不是產品，只有非產品才可以進行MSD
+去物料表中去找(basic_material)
+basic_sys.basic_material_mfg（製造商料號表裡面）
+去看msd_level字段
+若不等於0就是可以
+
+2）如果是MSD物料那麼就要判斷是不是已經封裝
+PkgInfoFeignDTO pkgInfoFeignDTO = getPkgInfoFeignDTO(StrUtil.EMPTY, StrUtil.EMPTY,
+                    StrUtil.EMPTY, orgCode, pkgId, StrUtil.EMPTY, StrUtil.EMPTY);
+            if (ObjectUtil.isNull(pkgInfoFeignDTO)) {
+                throw new CloudmesException(WmsMouldResultCode.NOT_FOUND_PKG_INFO_IN_MES.getCode(),
+                        MessageUtils.get(WmsMouldResultCode.NOT_FOUND_PKG_INFO_IN_MES.getLocalCode()));
+            }
+            //是否封装
+            boolean sealFlag = !"0".equals(pkgInfoFeignDTO.getMsdGrade()) && pkgInfoFeignDTO.isMsdSealFlag();
+            if (StatusCode.Y.getDictCode().equals(sealCondition)) {
+                if (!sealFlag) {
+                    throw new CloudmesException(WmsMouldResultCode.MSD_MATERIAL_MUST_NOT_OPEN.getCode(),
+                            MessageUtils.get(WmsMouldResultCode.MSD_MATERIAL_MUST_NOT_OPEN.getLocalCode()));
+                }
+            } else {
+                if (sealFlag) {
+                    throw new CloudmesException(WmsMouldResultCode.MSD_MATERIAL_IS_NOT_OPEN.getCode(),
+                            MessageUtils.get(WmsMouldResultCode.MSD_MATERIAL_IS_NOT_OPEN.getLocalCode()));
+                }
+            }
+
+
+這裡需要調用MES系統，裡面會直接就有字段判斷
+
+3）判斷剩餘時長是否大於8小時
+
+boolean remainTimeFlag = checkMsdRemainTime(pkgInfoFeignDTO, hour);
+
+
+
+6.	校验QHOLD
+
+這個需要調用QMS子系統
+
+
+
+
+
+
+
+7.	查询库位信息
+8.	新增下架条码履历
+9.	修改捡料记录
+10.	新增备料记录
+11.	查询库位信息
+12.	新增上线条码履历
+13.	工单明细
+
+
+最後回寫工單明細，finish
+
+updateWorkDetail(wmsWorkOrderDetailDb, currentQty);
+MaterialOnlineSubmitDTO materialOnlineSubmitDTO = new MaterialOnlineSubmitDTO();
+materialOnlineSubmitDTO.setPrepareVehicleCode(prepareVehicleCode);
+materialOnlineSubmitDTO.setBinCode(recommendDTO.getBinCode());
+materialOnlineSubmitDTO.setWorkOrderToLocation(wmsWorkOrderPrepareLog.getWorkOrderToLocation());
+materialOnlineSubmitDTO.setPkgId(pkgId);
+return materialOnlineSubmitDTO;
+
+
+
+
+
+
+
+
+
+
+	
+
+
+
+
