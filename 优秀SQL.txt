@@ -1,0 +1,264 @@
+   <select id="getAllECStock" resultType="com.maxnerva.cloudmes.tpm.model.dto.spm.StockPageDTO">
+        select * from (
+        select
+        ss.is_borrow  as type,
+        ss.office_code as office_code ,
+        dep.dep_name as office_name,
+        sm.material_name as material_name ,
+        sm.material_code as material_code  ,
+        sm.specification as specification ,
+        ss.product_series as product_series_id,
+        bmf.materialfamily_name as product_series ,
+        bc.customer_name as customer,
+        ss.customer_id as customer_id,
+        bu.id as unit_id ,
+        bw.warehouse_name as warehouse_name,
+        bw.id as warehouse_id,
+        ba.area_name as area_name ,
+        bb.location_name as bin_name ,
+        ss.bin_id as bin_id ,
+        ss.product_no as product_no ,
+        case when stock_status =1 then (select dict_name from basic_sys.sys_dict where dict_type ='SPM_MATERIAL_VALUE'  and dict_code ='GOOD_PRODUCT')
+        else (select dict_name from basic_sys.sys_dict where dict_type ='SPM_MATERIAL_VALUE'  and dict_code ='SCRAP_REPORTING') end as stock_status ,
+        ss.qty as qty ,
+        ss.available_qty as  available_qty,
+        ss.hold_qty  as hold_qty,
+        ss.last_edited_dt as last_edited_dt,
+        bu.uom_name as unit,
+        ss.area_id as area_id ,
+        ss.id as id,
+        sm.id as material_id,
+        sd.dict_name as material_class,
+        case when ss.is_borrow=true then (select dict_name from basic_sys.sys_dict where dict_type='SPM_INVENTORY_TYPE' and dict_code='SPM_UNREVERT')
+        else  (select dict_name from basic_sys.sys_dict where dict_type='SPM_INVENTORY_TYPE' and dict_code='SPM_ENTRY')  end as borrow_status,
+        case when ss.is_borrow=true then '0' else '1' end as borrow_status_flag,
+        case when ss.is_borrow=true then 'SPM_UNREVERT' else 'SPM_ENTRY' end as barcode_status_code,
+        case when  st.staff_name is null  then ss.borrower_code else ss.borrower_code ||'-'|| st.staff_name end as borrow_code,
+        ss.borrow_date as borrow_date,
+        ss.cost_code as cost_code ,
+        sd1.dict_name as control_method,
+        sm.price as price,
+        ss.stock_in_dt as stock_in_dt,
+        ss.stock_out_dt as stock_out_dt,
+        sm.abc_type as abc_type,
+        sm.brand as brand,
+        ss.borrow_cost_code as borrow_cost_code,
+        sd2.dict_name as abc_type_name,
+        ba.area_type
+        from
+        spm.spmbu_equipment_ccessories_stock ss
+        left join spm.spmbu_material sm on ss.material_id = sm.id
+        left join basic_sys.basic_customer bc on bc.id=ss.customer_id
+        left join basic_sys.basic_uom bu on bu.id=sm.unit
+        left join basic_sys.basic_warehouse bw on bw.id=ss.warehouse_id and bw.is_deleted is false
+        left join basic_sys.basic_area_location bb on bb.id=ss.bin_id   and bb.is_deleted is false  and bb.org_code=ss.org_code
+        left join basic_sys.basic_area ba on ba.id =bb.area_id  and ba.is_deleted is false  and ba.org_code =ss.org_code
+        left join basic_sys.basic_material_family bmf on bmf.id=ss.product_series  and bmf.is_deleted is false
+        left join basic_sys.sys_dict sd on sd.dict_code=sm.material_class_id and sd.is_deleted is false
+        left join basic_sys.sys_dict sd1 on sd1.dict_code=sm.control_method  and sd1.is_deleted is false
+        left join basic_sys.sys_dep  dep on ss.office_code = dep.dep_code and dep.is_deleted is false
+        left join basic_sys.sys_staff st on ss.borrower_code=st.staff_code   and st.is_deleted is false
+        left join basic_sys.sys_dict sd2 on sm.abc_type = sd2.dict_code and sd2.is_deleted is false and sd2.dict_type='SPM_MATARIAL_VALUE'
+        <where>
+            ss.org_code=#{orgCode} and sm.org_code=#{orgCode}
+            and ss.is_deleted  = false and sm.is_deleted is false and  ss.is_borrow is false
+            <if test="inventory!=null ">
+                <choose>
+                    <when test="inventory=='0'.toString() ">
+                        AND ss.qty = '0'
+                    </when>
+                    <when test="inventory=='1'.toString() ">
+                        AND ss.qty > '0'
+                    </when>
+                </choose>
+            </if>
+
+            <if test="officeName!=null and officeName!=''">
+                and ss.office_name like concat ('%',#{officeName},'%')
+            </if>
+            <if test="warehouseId!=null">
+                and ss.warehouse_id=#{warehouseId}
+            </if>
+            <if test="materialCode!=null and materialCode!=''">
+                and sm.material_code like concat ('%',#{materialCode},'%')
+            </if>
+            <if test="binId != null">
+                and ss.bin_id =#{binId}
+            </if>
+            <if test="specification!=null and specification!=''">
+                and sm.specification like concat ('%',#{specification},'%')
+            </if>
+            <if test="costCode != null and costCode != ''">
+                and ss.cost_code =#{costCode}
+            </if>
+            <if test=" borrowerCode != null and borrowerCode != ''">
+                and ss.borrower_code =#{borrowerCode}
+            </if>
+            <if test="customerId != null ">
+                and ss.customer_id =#{customerId,jdbcType=INTEGER}
+            </if>
+            <if test="productSeries!=null">
+                and ss.product_series =#{productSeries,jdbcType=VARCHAR}
+            </if>
+            <if test="documentType!=null">
+                <choose>
+                    <when test="documentType=='0'.toString() ">
+                        and ba.area_type ='GOOD_PRODUCT'
+                    </when>
+                    <when test="documentType=='1'.toString() ">
+                        and ba.area_type ='DEFECTIVE_PRODUCTS'
+                    </when>
+                    <when test="documentType=='2'.toString() ">
+                        and ba.area_type ='SCRAP_REPORTING'
+                    </when>
+                </choose>
+            </if>
+            <if test="materialName != null and materialName != ''">
+                and upper(sm.material_name) like concat ('%',upper(#{materialName}),'%')
+            </if>
+            <if test="keyWord != null and keyWord != ''">
+                and (upper(sm.material_code) like concat ('%',upper(#{keyWord}),'%')
+                or upper(sm.material_name) like concat ('%',upper(#{keyWord}),'%')
+                or upper(sm.specification) like concat ('%',upper(#{keyWord}),'%')
+                )
+            </if>
+            <if test="idList != null">
+                AND ss.id in (
+                <foreach collection="idList" item="item" separator=",">
+                    #{item}
+                </foreach>
+                )
+            </if>
+        </where>
+
+        union all
+        select
+        ss.is_borrow  as type,
+        ss.office_code as office_code ,
+        dep.dep_name as office_name,
+        sm.material_name as material_name ,
+        sm.material_code as material_code  ,
+        sm.specification as specification ,
+        ss.product_series as product_series_id,
+        bmf.materialfamily_name as product_series ,
+        bc.customer_name as customer,
+        ss.customer_id as customer_id,
+        bu.id as unit_id ,
+        bw.warehouse_name as warehouse_name,
+        bw.id as warehouse_id,
+        '' as area_name ,
+        '' as bin_name ,
+        ss.bin_id as bin_id ,
+        ss.product_no as product_no ,
+        case when stock_status =1 then (select dict_name from basic_sys.sys_dict where dict_type ='SPM_MATERIAL_VALUE'  and dict_code ='GOOD_PRODUCT')
+        else (select dict_name from basic_sys.sys_dict where dict_type ='SPM_MATERIAL_VALUE'  and dict_code ='SCRAP_REPORTING')  end as stock_status ,
+        ss.qty as qty ,
+        ss.available_qty as  available_qty,
+        ss.hold_qty  as hold_qty,
+        ss.last_edited_dt as last_edited_dt,
+        bu.uom_name as unit,
+        ss.area_id as area_id ,
+        ss.id as id,
+        sm.id as material_id,
+        sd.dict_name as material_class,
+        case when ss.is_borrow=true then (select dict_name from basic_sys.sys_dict where dict_type='SPM_INVENTORY_TYPE' and dict_code='SPM_UNREVERT')
+        else  (select dict_name from basic_sys.sys_dict where dict_type='SPM_INVENTORY_TYPE' and dict_code='SPM_ENTRY')  end as borrow_status,
+        case when ss.is_borrow=true then '0' else '1' end as borrow_status_flag,
+        case when ss.is_borrow=true then 'SPM_UNREVERT' else 'SPM_ENTRY' end as barcode_status_code,
+        case when  st.staff_name is null  then ss.borrower_code else ss.borrower_code ||'-'|| st.staff_name end as borrow_code,
+        ss.borrow_date as borrow_date,
+        ss.cost_code as cost_code ,
+        sd1.dict_name as control_method,
+        sm.price as price,
+        ss.stock_in_dt as stock_in_dt,
+        ss.stock_out_dt as stock_out_dt,
+        sm.abc_type as abc_type,
+        sm.brand as brand,
+        ss.borrow_cost_code as borrow_cost_code,
+        sd2.dict_name as abc_type_name,
+        '' as  area_type
+        from
+        spm.spmbu_equipment_ccessories_stock ss
+        left join spm.spmbu_material sm on
+        ss.material_id = sm.id
+        left join basic_sys.basic_customer bc on bc.id=ss.customer_id
+        left join basic_sys.basic_uom bu on bu.id=sm.unit
+        left join basic_sys.basic_warehouse bw on bw.id=ss.warehouse_id and bw.is_deleted is false
+        left join basic_sys.basic_material_family bmf on bmf.id=ss.product_series  and bmf.is_deleted is false
+        left join basic_sys.sys_dict sd on sd.dict_code=sm.material_class_id and sd.is_deleted is false
+        left join basic_sys.sys_dict sd1 on sd1.dict_code=sm.control_method  and sd1.is_deleted is false
+        left join basic_sys.sys_dep  dep on ss.office_code = dep.dep_code and dep.is_deleted is false
+        left join basic_sys.sys_staff st on ss.borrower_code=st.staff_code   and st.is_deleted is false
+        left join basic_sys.sys_dict sd2 on sm.abc_type = sd2.dict_code and sd2.is_deleted is false and sd2.dict_type='SPM_MATARIAL_VALUE'
+        <where>
+            ss.org_code=#{orgCode} and sm.org_code=#{orgCode}
+            and ss.is_deleted  = false and sm.is_deleted is false  and  ss.is_borrow is true
+            <if test="inventory!=null ">
+                <choose>
+                    <when test="inventory=='0'.toString() ">
+                        AND ss.qty = '0'
+                    </when>
+                    <when test="inventory=='1'.toString() ">
+                        AND ss.qty > '0'
+                    </when>
+                </choose>
+            </if>
+
+            <if test="officeName!=null and officeName!=''">
+                and ss.office_name like concat ('%',#{officeName},'%')
+            </if>
+            <if test="warehouseId!=null">
+                and ss.warehouse_id=#{warehouseId}
+            </if>
+            <if test="materialCode!=null and materialCode!=''">
+                and sm.material_code like concat ('%',#{materialCode},'%')
+            </if>
+            <if test="binId != null">
+                and ss.bin_id =#{binId}
+            </if>
+            <if test="specification!=null and specification!=''">
+                and sm.specification like concat ('%',#{specification},'%')
+            </if>
+            <if test="costCode != null and costCode != ''">
+                and ss.cost_code =#{costCode}
+            </if>
+            <if test=" borrowerCode != null and borrowerCode != ''">
+                and ss.borrower_code =#{borrowerCode}
+            </if>
+            <if test="customerId != null ">
+                and ss.customer_id =#{customerId,jdbcType=INTEGER}
+            </if>
+            <if test="productSeries!=null">
+                and ss.product_series =#{productSeries,jdbcType=VARCHAR}
+            </if>
+            <if test="materialName != null and materialName != ''">
+                and upper(sm.material_name) like concat ('%',upper(#{materialName}),'%')
+            </if>
+            <if test="keyWord != null and keyWord != ''">
+                and (upper(sm.material_code) like concat ('%',upper(#{keyWord}),'%')
+                or upper(sm.material_name) like concat ('%',upper(#{keyWord}),'%')
+                or upper(sm.specification) like concat ('%',upper(#{keyWord}),'%')
+                )
+            </if>
+            <if test="idList != null">
+                AND ss.id in (
+                <foreach collection="idList" item="item" separator=",">
+                    #{item}
+                </foreach>
+                )
+            </if>
+        </where>
+        ) t
+        <where>
+            <if test="stockType != null and stockType != ''">
+                <choose>
+                    <when test="stockType=='SPM_UNREVERT'.toString() ">
+                        and t.type=true
+                    </when>
+                    <otherwise>
+                        and t.type=false
+                    </otherwise>
+                </choose>
+            </if>
+        </where>
+    </select>
